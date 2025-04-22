@@ -3,7 +3,7 @@ import logging
 import asyncio
 from dotenv import load_dotenv
 from signal import SIGINT, SIGTERM
-from livekit import rtc, api
+from livekit import rtc
 import pyaudio
 from auth import generate_token
 
