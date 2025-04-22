@@ -20,16 +20,16 @@ Set up the environment by copying `.env.example` to `.env` and filling in the re
 - `LIVEKIT_API_SECRET`
 - `OPENAI_API_KEY`
 
-You can also do this automatically using the LiveKit CLI:
-
-```bash
-lk app env
-```
-
-Run the agent:
+Run the audio publisher:
 
 ```console
-python3 agent.py dev
+python3 send_audio.py
 ```
 
-This agent requires a frontend application to communicate with. You can use one of our example frontends in [livekit-examples](https://github.com/livekit-examples/), create your own following one of our [client quickstarts](https://docs.livekit.io/realtime/quickstarts/), or test instantly against one of our hosted [Sandbox](https://cloud.livekit.io/projects/p_/sandbox) frontends.
+Run the audio receiver:
+
+```console
+python3 receive_audio.py
+```
+
+Please use headphones to avoid audio feedback.  You should be able to speak into the mic and hear the audio played back through the speakers.
