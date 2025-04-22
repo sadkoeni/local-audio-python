@@ -26,7 +26,8 @@ async def main(room: rtc.Room):
     audio_stream = pa.open(format=pyaudio.paInt16,
                 channels=NUM_CHANNELS,
                 rate=SAMPLE_RATE,
-                output=True)
+                output=True,
+                output_device_index=1)
 
 
     async def receive_audio_frames(stream: rtc.AudioStream):
