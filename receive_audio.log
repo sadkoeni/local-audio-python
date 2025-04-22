@@ -1,0 +1,19 @@
+INFO:livekit:livekit_ffi::server:139:livekit_ffi::server - initializing ffi server v0.12.22
+INFO:livekit:livekit_ffi::cabi:36:livekit_ffi::cabi - initializing ffi server v0.12.22
+INFO:livekit:livekit_api::signal_client::signal_stream:106:livekit_api::signal_client::signal_stream - connecting to wss://dchen-26cqnmh4.livekit.cloud/rtc?sdk=python&protocol=15&auto_subscribe=1&adaptive_stream=0&version=1.0.6&access_token=...
+INFO:__main__:connected to room test-room
+INFO:root:track published: TR_AMg5rvUmFfkCc6 from participant PA_ReVJS9ihKUZ2 (audio-publisher)
+INFO:__main__:track subscribed: TR_AMg5rvUmFfkCc6
+INFO:livekit:livekit::room:1253:livekit::room - disconnected from room with reason: ClientInitiated
+INFO:livekit:livekit_ffi::server:139:livekit_ffi::server - initializing ffi server v0.12.22
+INFO:livekit:livekit_ffi::cabi:36:livekit_ffi::cabi - initializing ffi server v0.12.22
+INFO:livekit:livekit_api::signal_client::signal_stream:106:livekit_api::signal_client::signal_stream - connecting to wss://dchen-26cqnmh4.livekit.cloud/rtc?sdk=python&protocol=15&auto_subscribe=1&adaptive_stream=0&version=1.0.6&access_token=...
+INFO:__main__:connected to room test-room
+INFO:__main__:track subscribed: TR_AMbEo75kZyqkVy
+INFO:livekit:livekit::room:1253:livekit::room - disconnected from room with reason: ClientInitiated
+INFO:livekit:livekit_ffi::server:139:livekit_ffi::server - initializing ffi server v0.12.22
+INFO:livekit:livekit_ffi::cabi:36:livekit_ffi::cabi - initializing ffi server v0.12.22
+INFO:livekit:livekit_api::signal_client::signal_stream:106:livekit_api::signal_client::signal_stream - connecting to wss://dchen-26cqnmh4.livekit.cloud/rtc?sdk=python&protocol=15&auto_subscribe=1&adaptive_stream=0&version=1.0.6&access_token=...
+INFO:__main__:connected to room test-room
+INFO:__main__:track subscribed: TR_AMqBYfkwGnjJ3Q
+INFO:livekit:livekit::room:1253:livekit::room - disconnected from room with reason: ClientInitiated
