@@ -1,3 +1,10 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# dependencies = [
+#   "pyaudio",
+# ]
+# ///
+
 import pyaudio
 
 p = pyaudio.PyAudio()
