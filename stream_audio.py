@@ -1,3 +1,15 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# dependencies = [
+#   "livekit",
+#   "livekit_api",
+#   "pyaudio",
+#   "pyserial",
+#   "python-dotenv",
+#   "asyncio",
+# ]
+# ///
+
 import os
 import logging
 import asyncio
@@ -7,6 +19,7 @@ from livekit import rtc
 import pyaudio
 import numpy as np
 from auth import generate_token
+from collections import deque
 
 load_dotenv()
 # ensure LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET are set in your .env file
@@ -18,15 +31,166 @@ SAMPLE_RATE = 48000
 NUM_CHANNELS = 1
 CHUNK_SIZE = 480  # 10ms at 48kHz
 
+def find_audio_devices():
+    """Find suitable input and output audio devices"""
+    audio = pyaudio.PyAudio()
+    
+    input_device = None
+    output_device = None
+    
+    logger = logging.getLogger(__name__)
+    logger.info("Available audio devices:")
+    
+    for i in range(audio.get_device_count()):
+        info = audio.get_device_info_by_index(i)
+        logger.info(f"Device {i}: {info['name']} - Max Inputs: {info['maxInputChannels']}, Max Outputs: {info['maxOutputChannels']}")
+        
+        # Find a suitable input device (microphone)
+        if input_device is None and info['maxInputChannels'] >= NUM_CHANNELS:
+            try:
+                # Test if we can open the device
+                test_stream = audio.open(
+                    format=pyaudio.paInt16,
+                    channels=NUM_CHANNELS,
+                    rate=SAMPLE_RATE,
+                    input=True,
+                    input_device_index=i,
+                    frames_per_buffer=CHUNK_SIZE
+                )
+                test_stream.close()
+                input_device = i
+                logger.info(f"Selected input device {i}: {info['name']}")
+            except Exception as e:
+                logger.debug(f"Could not use device {i} for input: {e}")
+        
+        # Find a suitable output device (speakers)
+        if output_device is None and info['maxOutputChannels'] >= NUM_CHANNELS:
+            try:
+                # Test if we can open the device
+                test_stream = audio.open(
+                    format=pyaudio.paInt16,
+                    channels=NUM_CHANNELS,
+                    rate=SAMPLE_RATE,
+                    output=True,
+                    output_device_index=i,
+                    frames_per_buffer=CHUNK_SIZE
+                )
+                test_stream.close()
+                output_device = i
+                logger.info(f"Selected output device {i}: {info['name']}")
+            except Exception as e:
+                logger.debug(f"Could not use device {i} for output: {e}")
+    
+    audio.terminate()
+    return input_device, output_device
+
+class SimpleAEC:
+    """Simple Acoustic Echo Cancellation using adaptive filtering"""
+    
+    def __init__(self, filter_length=1024, step_size=0.01):
+        self.filter_length = filter_length
+        self.step_size = step_size
+        self.w = np.zeros(filter_length)  # Adaptive filter coefficients
+        self.x_buffer = deque(maxlen=filter_length)  # Reference signal buffer (speaker output)
+        self.y_buffer = deque(maxlen=filter_length)  # Error signal buffer
+        
+        # Initialize buffers with zeros
+        for _ in range(filter_length):
+            self.x_buffer.append(0.0)
+            self.y_buffer.append(0.0)
+    
+    def process(self, microphone_signal, reference_signal):
+        """
+        Process audio frame with AEC
+        microphone_signal: audio from microphone (numpy array)
+        reference_signal: audio being played to speakers (numpy array)
+        Returns: echo-cancelled microphone signal
+        """
+        if len(microphone_signal) == 0:
+            return microphone_signal
+        
+        output = np.zeros_like(microphone_signal, dtype=np.float32)
+        
+        for i in range(len(microphone_signal)):
+            # Add reference signal to buffer
+            if len(reference_signal) > i:
+                self.x_buffer.append(float(reference_signal[i]))
+            else:
+                self.x_buffer.append(0.0)
+            
+            # Convert buffer to numpy array for processing
+            x_vec = np.array(list(self.x_buffer), dtype=np.float32)
+            
+            # Normalize the reference vector to prevent instability
+            x_norm = np.linalg.norm(x_vec)
+            if x_norm > 1e-10:  # Avoid division by zero
+                x_vec_normalized = x_vec / x_norm
+            else:
+                x_vec_normalized = x_vec
+            
+            # Estimate echo using adaptive filter
+            estimated_echo = np.dot(self.w, x_vec_normalized)
+            
+            # Clamp estimated echo to reasonable range
+            estimated_echo = np.clip(estimated_echo, -32000, 32000)
+            
+            # Subtract estimated echo from microphone signal
+            error_signal = float(microphone_signal[i]) - estimated_echo
+            
+            # Clamp error signal to valid audio range
+            error_signal = np.clip(error_signal, -32000, 32000)
+            output[i] = error_signal
+            
+            # Update filter coefficients using normalized LMS algorithm
+            if x_norm > 1e-10:
+                # Normalized LMS update with regularization
+                mu_normalized = self.step_size / (x_norm + 1e-6)
+                self.w += mu_normalized * error_signal * x_vec_normalized
+                
+                # Prevent filter coefficients from growing too large
+                self.w = np.clip(self.w, -10.0, 10.0)
+            
+            # Check for invalid values and reset if necessary
+            if np.any(np.isnan(self.w)) or np.any(np.isinf(self.w)):
+                self.w = np.zeros_like(self.w)
+            
+            # Add error to buffer for next iteration
+            self.y_buffer.append(error_signal)
+        
+        # Final clipping and conversion to int16
+        output = np.clip(output, -32767, 32767)
+        
+        # Check for any remaining invalid values
+        output = np.where(np.isfinite(output), output, 0.0)
+        
+        return output.astype(np.int16)
+
 async def main(room: rtc.Room):
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger(__name__)
 
+    # Find suitable audio devices
+    input_device_index, output_device_index = find_audio_devices()
+    
+    if input_device_index is None:
+        logger.error("No suitable input device found!")
+        return
+    
+    if output_device_index is None:
+        logger.error("No suitable output device found!")
+        return
+
     # Create the audio source for publishing microphone audio
     source = rtc.AudioSource(SAMPLE_RATE, NUM_CHANNELS)
     
+    # Initialize AEC
+    aec = SimpleAEC(filter_length=512, step_size=0.001)
+    
     # Flag to control when to stop capturing
     running = True
+    
+    # Buffer for reference signal (what we're playing to speakers)
+    current_reference = np.zeros(CHUNK_SIZE, dtype=np.int16)
 
     # init pyaudio
     audio = pyaudio.PyAudio()
@@ -37,6 +201,7 @@ async def main(room: rtc.Room):
         channels=NUM_CHANNELS,
         rate=SAMPLE_RATE,
         input=True,
+        input_device_index=input_device_index,
         frames_per_buffer=CHUNK_SIZE,
     )
     
@@ -46,7 +211,7 @@ async def main(room: rtc.Room):
         channels=NUM_CHANNELS,
         rate=SAMPLE_RATE,
         output=True,
-        output_device_index=1
+        output_device_index=output_device_index
     )
 
     # Task to handle audio capture from microphone
@@ -64,15 +229,18 @@ async def main(room: rtc.Room):
                 # Process the audio data
                 input_array = np.frombuffer(in_data, dtype=np.int16)
                 
+                # Apply AEC - use current reference signal being played
+                processed_audio = aec.process(input_array, current_reference)
+                
                 # Create an audio frame
                 audio_frame = rtc.AudioFrame.create(SAMPLE_RATE, NUM_CHANNELS, CHUNK_SIZE)
                 
                 # Convert the audio frame to a numpy array
                 audio_data = np.frombuffer(audio_frame.data, dtype=np.int16)
                 
-                # Copy only as many samples as we have in the input or can fit in the output
-                sample_count = min(len(input_array), len(audio_data))
-                np.copyto(audio_data[:sample_count], input_array[:sample_count])
+                # Copy processed (echo-cancelled) audio
+                sample_count = min(len(processed_audio), len(audio_data))
+                np.copyto(audio_data[:sample_count], processed_audio[:sample_count])
                 
                 # Publish the frame
                 await source.capture_frame(audio_frame)
@@ -86,9 +254,28 @@ async def main(room: rtc.Room):
 
     # Function to handle received audio frames from other participants
     async def receive_audio_frames(stream: rtc.AudioStream):
+        nonlocal current_reference
         async for frame in stream:
             try:
-                output_stream.write(frame.frame.data.tobytes())
+                # Get the audio data
+                audio_data = frame.frame.data.tobytes()
+                
+                # Convert to numpy array for AEC reference
+                reference_array = np.frombuffer(audio_data, dtype=np.int16)
+                
+                # Update reference signal for AEC
+                if len(reference_array) == CHUNK_SIZE:
+                    current_reference = reference_array.copy()
+                else:
+                    # Pad or truncate to match chunk size
+                    if len(reference_array) < CHUNK_SIZE:
+                        current_reference = np.pad(reference_array, (0, CHUNK_SIZE - len(reference_array)))
+                    else:
+                        current_reference = reference_array[:CHUNK_SIZE]
+                
+                # Play the audio
+                output_stream.write(audio_data)
+                
             except Exception as e:
                 logger.warning(f"Error writing audio output: {e}")
 
@@ -158,7 +345,8 @@ async def main(room: rtc.Room):
         await room.disconnect()
 
 
-if __name__ == "__main__":
+async def async_main():
+    """Main async function to replace the old event loop approach"""
     logging.basicConfig(
         level=logging.INFO,
         handlers=[
@@ -167,26 +355,30 @@ if __name__ == "__main__":
         ],
     )
     
-    loop = asyncio.get_event_loop()
-    room = rtc.Room(loop=loop)
-
+    room = rtc.Room()
+    
+    # Setup signal handlers for cleanup
     async def cleanup():
         try:
             await room.disconnect()
         except:
             pass
-        task = asyncio.current_task()
-        tasks = [t for t in asyncio.all_tasks() if t is not task]
-        for t in tasks:
-            t.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
-        loop.stop()
 
-    asyncio.ensure_future(main(room))
-    for signal in [SIGINT, SIGTERM]:
-        loop.add_signal_handler(signal, lambda: asyncio.ensure_future(cleanup()))
-
+    # Handle shutdown gracefully
     try:
-        loop.run_forever()
+        await main(room)
+    except KeyboardInterrupt:
+        logging.info("Received interrupt signal, shutting down...")
     finally:
-        loop.close() 
+        await cleanup()
+
+
+if __name__ == "__main__":
+    # Use the modern asyncio.run() instead of deprecated get_event_loop()
+    try:
+        asyncio.run(async_main())
+    except KeyboardInterrupt:
+        logging.info("Application interrupted by user")
+    except Exception as e:
+        logging.error(f"Application error: {e}")
+        raise 
