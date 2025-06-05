@@ -309,7 +309,7 @@ async def main(room: rtc.Room):
         )
 
     # Generate LiveKit token and connect to room
-    token = generate_token(ROOM_NAME, "audio-streamer", "Audio Streamer")
+    token = generate_token(ROOM_NAME, "audio-streamer2", "Audio Streamer")
     await room.connect(LIVEKIT_URL, token)
     logger.info("connected to room %s", room.name)
     

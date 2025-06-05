@@ -1,3 +1,14 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# dependencies = [
+#   "livekit",
+#   "livekit_api",
+#   "pyaudio",
+#   "pyserial",
+#   "python-dotenv",
+#   "asyncio",
+# ]
+# ///
 import os
 import logging
 import asyncio
