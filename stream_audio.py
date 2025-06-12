@@ -246,6 +246,10 @@ class AudioStreamer:
                         key = sys.stdin.read(1)
                         if key.lower() == 'm':
                             self.toggle_mute()
+                        elif key.lower() == 'q':
+                            self.logger.info("Quit requested by user")
+                            self.running = False
+                            break
                         elif key == '\x03':  # Ctrl+C
                             break
                             
@@ -260,7 +264,7 @@ class AudioStreamer:
         
         self.keyboard_thread = threading.Thread(target=keyboard_handler, daemon=True)
         self.keyboard_thread.start()
-        self.logger.info("Keyboard handler started - Press 'm' to toggle mute")
+        self.logger.info("Keyboard handler started - Press 'm' to toggle mute, 'q' to quit")
 
     def stop_keyboard_handler(self):
         """Stop keyboard handler"""
@@ -464,7 +468,7 @@ class AudioStreamer:
         status_info = f"[IN:{self.input_callback_count} OUT:{self.output_callback_count} Q:{self.audio_input_queue.qsize()}]"
         
         # Build the complete meter line
-        meter_text = f"[Audio] {live_indicator} {self.input_device_name[-15:]} [{self.micro_db:6.2f} dBFS] {_esc(color_code)}[{bar}]{_esc(0)} {status_info} (Press 'm' to toggle mute)"
+        meter_text = f"[Audio] {live_indicator} {self.input_device_name[-15:]} [{self.micro_db:6.2f} dBFS] {_esc(color_code)}[{bar}]{_esc(0)} {status_info} (Press 'm' to toggle mute, 'q' to quit)"
         
         # Ensure consistent width (pad or truncate to 140 chars to prevent wrapping)
         meter_text = meter_text[:140].ljust(140)
@@ -649,7 +653,7 @@ async def main(participant_name: str, enable_aec: bool = True):
         
         # Keep running until interrupted
         try:
-            while True:
+            while streamer.running:
                 await asyncio.sleep(1)
         except KeyboardInterrupt:
             logger.info("Stopping audio streaming...")
