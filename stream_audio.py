@@ -136,6 +136,10 @@ class AudioStreamer:
         self.micro_db = INPUT_DB_MIN
         self.input_device_name = "Microphone"
         
+        # Participant tracking for dB meters
+        self.participants = {}  # participant_id -> {'name': str, 'db_level': float, 'last_update': float}
+        self.participants_lock = threading.Lock()
+        
         # Control flags
         self.meter_running = True
         self.keyboard_thread = None
@@ -448,7 +452,11 @@ class AudioStreamer:
         """Print dB meter with live/mute indicator - stable non-scrolling version"""
         if not self.meter_running:
             return
-            
+        
+        # Build a single compact line with all participants
+        meter_parts = []
+        
+        # Local microphone meter
         amplitude_db = _normalize_db(self.micro_db, db_min=INPUT_DB_MIN, db_max=INPUT_DB_MAX)
         nb_bar = round(amplitude_db * MAX_AUDIO_BAR)
         
@@ -460,25 +468,46 @@ class AudioStreamer:
             is_muted = self.is_muted
         
         if is_muted:
-            live_indicator = f"{_esc(90)}●{_esc(0)}"  # Gray dot, removed text
+            live_indicator = f"{_esc(90)}●{_esc(0)}"  # Gray dot
         else:
-            live_indicator = f"{_esc(91)}●{_esc(0)}"   # Red dot, removed text
+            live_indicator = f"{_esc(91)}●{_esc(0)}"   # Red dot
+        
+        # Local mic part
+        local_part = f"{live_indicator}Mic[{self.micro_db:4.1f}]{_esc(color_code)}[{bar}]{_esc(0)}"
+        meter_parts.append(local_part)
+        
+        # Add participant meters (compact format)
+        current_time = time.time()
+        with self.participants_lock:
+            for participant_id, info in list(self.participants.items()):
+                # Remove stale participants (no audio for 5 seconds)
+                if current_time - info['last_update'] > 5.0:
+                    del self.participants[participant_id]
+                    continue
+                
+                # Calculate participant meter
+                participant_amplitude_db = _normalize_db(info['db_level'], db_min=INPUT_DB_MIN, db_max=INPUT_DB_MAX)
+                participant_nb_bar = round(participant_amplitude_db * (MAX_AUDIO_BAR // 2))  # Smaller bars for participants
+                
+                participant_color_code = 31 if participant_amplitude_db > 0.75 else 33 if participant_amplitude_db > 0.5 else 32
+                participant_bar = "#" * participant_nb_bar + "-" * ((MAX_AUDIO_BAR // 2) - participant_nb_bar)
+                
+                participant_indicator = f"{_esc(94)}●{_esc(0)}"  # Blue dot for remote participants
+                
+                participant_part = f"{participant_indicator}{info['name'][:6]}[{info['db_level']:4.1f}]{_esc(participant_color_code)}[{participant_bar}]{_esc(0)}"
+                meter_parts.append(participant_part)
         
         # Compact status info
-        status_info = f"I:{self.input_callback_count} O:{self.output_callback_count} Q:{self.audio_input_queue.qsize()}"
+        status_info = f"I:{self.input_callback_count} O:{self.output_callback_count} Q:{self.audio_input_queue.qsize()} P:{len(self.participants)}"
         
-        # Build the compact meter line
-        meter_text = f"{live_indicator} {self.input_device_name[-10:]} [{self.micro_db:4.1f}dB] {_esc(color_code)}[{bar}]{_esc(0)} {status_info}"
+        # Join all parts with spaces
+        meter_text = " ".join(meter_parts) + f" {status_info}"
         
-        # Ensure consistent width (pad or truncate to 90 chars to prevent wrapping on most terminals)
-        meter_text = meter_text[:90].ljust(90)
+        # Ensure consistent width (truncate to prevent wrapping)
+        meter_text = meter_text[:120]
         
         with self.stdout_lock:
-            # ANSI escape sequences for stable display:
-            # \033[2K - Clear entire line
-            # \r - Return to beginning of line  
-            # \033[?25l - Hide cursor
-            # \033[?25h - Show cursor (we'll show it later)
+            # Simple single-line update - clear line and rewrite
             sys.stdout.write(f"\033[2K\r\033[?25l{meter_text}")
             sys.stdout.flush()
 
@@ -555,9 +584,15 @@ async def main(participant_name: str, enable_aec: bool = True):
         logger.info("Meter task ended")
     
     # Function to handle received audio frames
-    async def receive_audio_frames(stream: rtc.AudioStream):
+    async def receive_audio_frames(stream: rtc.AudioStream, participant: rtc.RemoteParticipant):
         frames_received = 0
         logger.info("Audio receive task started")
+        
+        # Use participant info passed from event handler
+        participant_id = participant.sid
+        participant_name = participant.identity or f"User_{participant.sid[:8]}"
+        
+        logger.info(f"Receiving audio from participant: {participant_name} ({participant_id})")
         
         async for frame_event in stream:
             if not streamer.running:
@@ -565,17 +600,40 @@ async def main(participant_name: str, enable_aec: bool = True):
                 
             frames_received += 1
             if frames_received <= 5:
-                logger.info(f"Received audio frame {frames_received} from LiveKit")
+                logger.info(f"Received audio frame {frames_received} from {participant_name}")
             elif frames_received % 100 == 0:
-                logger.info(f"Received {frames_received} frames total from LiveKit")
+                logger.info(f"Received {frames_received} frames total from {participant_name}")
+                
+            # Calculate dB level for this participant
+            frame_data = frame_event.frame.data
+            if len(frame_data) > 0:
+                # Convert to numpy array for dB calculation
+                audio_samples = np.frombuffer(frame_data, dtype=np.int16)
+                if len(audio_samples) > 0:
+                    rms = np.sqrt(np.mean(audio_samples.astype(np.float32) ** 2))
+                    max_int16 = np.iinfo(np.int16).max
+                    participant_db = 20.0 * np.log10(rms / max_int16 + 1e-6)
+                    
+                    # Update participant info
+                    with streamer.participants_lock:
+                        streamer.participants[participant_id] = {
+                            'name': participant_name,
+                            'db_level': participant_db,
+                            'last_update': time.time()
+                        }
                 
             # Add received audio to output buffer
             audio_data = frame_event.frame.data.tobytes()
             with streamer.output_lock:
                 streamer.output_buffer.extend(audio_data)
         
-        logger.info(f"Audio receive task ended. Total frames received: {frames_received}")
-    
+        logger.info(f"Audio receive task ended for {participant_name}. Total frames received: {frames_received}")
+        
+        # Clean up participant when stream ends
+        with streamer.participants_lock:
+            if participant_id in streamer.participants:
+                del streamer.participants[participant_id]
+
     # Event handlers
     @room.on("track_subscribed")
     def on_track_subscribed(
@@ -583,10 +641,11 @@ async def main(participant_name: str, enable_aec: bool = True):
         publication: rtc.RemoteTrackPublication,
         participant: rtc.RemoteParticipant,
     ):
-        logger.info("track subscribed: %s", publication.sid)
+        logger.info("track subscribed: %s from participant %s (%s)", publication.sid, participant.sid, participant.identity)
         if track.kind == rtc.TrackKind.KIND_AUDIO:
+            logger.info(f"Starting audio stream for participant: {participant.identity}")
             audio_stream = rtc.AudioStream(track, sample_rate=SAMPLE_RATE, num_channels=NUM_CHANNELS)
-            asyncio.ensure_future(receive_audio_frames(audio_stream))
+            asyncio.ensure_future(receive_audio_frames(audio_stream, participant))
 
     @room.on("track_published")
     def on_track_published(
@@ -602,6 +661,23 @@ async def main(participant_name: str, enable_aec: bool = True):
     @room.on("participant_connected")
     def on_participant_connected(participant: rtc.RemoteParticipant):
         logger.info("participant connected: %s %s", participant.sid, participant.identity)
+        # Initialize participant in our tracking
+        with streamer.participants_lock:
+            streamer.participants[participant.sid] = {
+                'name': participant.identity or f"User_{participant.sid[:8]}",
+                'db_level': INPUT_DB_MIN,
+                'last_update': time.time()
+            }
+        logger.info(f"Added participant to tracking: {participant.identity}")
+
+    @room.on("participant_disconnected")
+    def on_participant_disconnected(participant: rtc.RemoteParticipant):
+        logger.info("participant disconnected: %s %s", participant.sid, participant.identity)
+        # Remove participant from our tracking
+        with streamer.participants_lock:
+            if participant.sid in streamer.participants:
+                del streamer.participants[participant.sid]
+                logger.info(f"Removed participant from tracking: {participant.identity}")
 
     @room.on("connected")
     def on_connected():
