@@ -532,7 +532,14 @@ class AudioStreamer:
         total_delay = self.output_delay + self.input_delay
         
         if self.audio_processor:
-            self.audio_processor.set_stream_delay_ms(int(total_delay * 1000))
+            try:
+                self.audio_processor.set_stream_delay_ms(int(total_delay * 1000))
+            except RuntimeError as e:
+                # Log the error but continue processing - this is a known issue with APM
+                if not hasattr(self, '_delay_error_logged'):
+                    self.logger.warning(f"Failed to set APM stream delay: {e}")
+                    self.logger.warning("Continuing without delay compensation - audio quality may be affected")
+                    self._delay_error_logged = True
         
         # Process audio in 10ms frames for AEC
         num_frames = frame_count // FRAME_SAMPLES
@@ -567,7 +574,10 @@ class AudioStreamer:
                     if self.frames_processed <= 5:
                         self.logger.debug(f"Applied AEC to frame {self.frames_processed}")
                 except Exception as e:
-                    self.logger.warning(f"Error processing audio stream: {e}")
+                    # Log the error but continue processing
+                    if self.frames_processed <= 10:
+                        self.logger.warning(f"Error processing audio stream with AEC: {e}")
+                    # Only log this error for the first few frames to avoid spam
             
             # Calculate dB level for meter using original (unmuted) audio
             rms = np.sqrt(np.mean(original_chunk.astype(np.float32) ** 2))
@@ -659,8 +669,10 @@ class AudioStreamer:
                 try:
                     self.audio_processor.process_reverse_stream(render_frame)
                 except Exception as e:
+                    # Log the error but continue processing
                     if self.output_callback_count <= 10:
-                        self.logger.warning(f"Error processing reverse stream: {e}")
+                        self.logger.warning(f"Error processing reverse stream with AEC: {e}")
+                    # Only log this error for the first few callbacks to avoid spam
     
     def print_audio_meter(self):
         """Print dB meter with live/mute indicator - supports both curses and terminal modes"""
