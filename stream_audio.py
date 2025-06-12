@@ -145,9 +145,9 @@ class CursesUI:
         else:
             color = curses.color_pair(self.COLOR_METER_LOW)
         
-        # Draw meter bar
+        # Draw meter bar - use wider fixed width for dB display
         meter_str = "█" * filled_width + "░" * (bar_width - filled_width)
-        db_str = f"[{level_db:5.1f}]"
+        db_str = f"[{level_db:6.1f}]"  # Changed from 5.1f to 6.1f for wider range
         
         try:
             self.stdscr.addstr(y, x, db_str)
@@ -694,6 +694,9 @@ class AudioStreamer:
         # Build a single compact line with all participants
         meter_parts = []
         
+        # Compact status info - moved to beginning of line
+        status_info = f"I:{self.input_callback_count} O:{self.output_callback_count} Q:{self.audio_input_queue.qsize()} P:{len(self.participants)} "
+        
         # Local microphone meter
         amplitude_db = _normalize_db(self.micro_db, db_min=INPUT_DB_MIN, db_max=INPUT_DB_MAX)
         nb_bar = round(amplitude_db * MAX_AUDIO_BAR)
@@ -711,7 +714,7 @@ class AudioStreamer:
             live_indicator = f"{_esc(1, 38, 2, 255, 0, 0)}●{_esc(0)} "   # Bright red dot
         
         # Local mic part
-        local_part = f"{live_indicator}Mic[{self.micro_db:5.1f}]{_esc(color_code)}[{bar}]{_esc(0)}"
+        local_part = f"{live_indicator}Mic[{self.micro_db:6.1f}]{_esc(color_code)}[{bar}]{_esc(0)}"
         meter_parts.append(local_part)
         
         # Add participant meters (compact format)
@@ -732,17 +735,11 @@ class AudioStreamer:
                 
                 participant_indicator = f"{_esc(94)}●{_esc(0)} "  # Blue dot for remote participants
                 
-                participant_part = f"{participant_indicator}{info['name'][:6]}[{info['db_level']:5.1f}]{_esc(participant_color_code)}[{participant_bar}]{_esc(0)}"
+                participant_part = f"{participant_indicator}{info['name'][:6]}[{info['db_level']:6.1f}]{_esc(participant_color_code)}[{participant_bar}]{_esc(0)}"
                 meter_parts.append(participant_part)
         
-        # Compact status info
-        status_info = f"I:{self.input_callback_count} O:{self.output_callback_count} Q:{self.audio_input_queue.qsize()} P:{len(self.participants)}"
-        
-        # Join all parts with spaces
-        meter_text = " ".join(meter_parts) + f" {status_info}"
-        
-        # Ensure consistent width (truncate to prevent wrapping)
-        meter_text = meter_text[:120]
+        # Join status info at the beginning with all parts
+        meter_text = status_info + " ".join(meter_parts)
         
         with self.stdout_lock:
             # Simple single-line update - clear line and rewrite
