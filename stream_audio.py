@@ -27,6 +27,7 @@ from livekit.rtc import apm
 import sounddevice as sd
 import numpy as np
 from auth import generate_token
+from list_devices import list_audio_devices
 
 load_dotenv()
 # ensure LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET are set in your .env file
@@ -50,34 +51,6 @@ def _esc(*codes: int) -> str:
 def _normalize_db(amplitude_db: float, db_min: float, db_max: float) -> float:
     amplitude_db = max(db_min, min(amplitude_db, db_max))
     return (amplitude_db - db_min) / (db_max - db_min)
-
-def list_audio_devices():
-    """List all available audio devices for debugging"""
-    print("\n=== AUDIO DEVICES DEBUG ===")
-    try:
-        devices = sd.query_devices()
-        print(f"Total devices found: {len(devices)}")
-        for i, device in enumerate(devices):
-            print(f"Device {i}: {device['name']}")
-            print(f"  Channels: in={device['max_input_channels']}, out={device['max_output_channels']}")
-            print(f"  Sample rates: {device['default_samplerate']}")
-            print(f"  Hostapi: {device['hostapi']}")
-        
-        default_in, default_out = sd.default.device
-        print(f"\nDefault input device: {default_in}")
-        print(f"Default output device: {default_out}")
-        
-        if default_in is not None:
-            in_info = sd.query_devices(default_in)
-            print(f"Default input info: {in_info['name']} - {in_info['max_input_channels']} channels")
-        
-        if default_out is not None:
-            out_info = sd.query_devices(default_out)
-            print(f"Default output info: {out_info['name']} - {out_info['max_output_channels']} channels")
-            
-    except Exception as e:
-        print(f"Error listing audio devices: {e}")
-    print("=== END AUDIO DEVICES ===\n")
 
 class CursesUI:
     """Full-screen ncurses UI for audio monitoring"""
