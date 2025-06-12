@@ -20,7 +20,6 @@ import select
 import termios
 import tty
 import curses
-import math
 from dotenv import load_dotenv
 from signal import SIGINT, SIGTERM
 from livekit import rtc
@@ -34,21 +33,13 @@ load_dotenv()
 LIVEKIT_URL = os.environ.get("LIVEKIT_URL")
 ROOM_NAME = os.environ.get("ROOM_NAME")
 
-# using exact values from example.py
 SAMPLE_RATE = 24000  # 48kHz to match DC Microphone native rate
 NUM_CHANNELS = 1
 FRAME_SAMPLES = 240  # 10ms at 48kHz - required for APM
 BLOCKSIZE = 2400  # 100ms buffer
 
-# original
-# SAMPLE_RATE = 48000  # 48kHz to match DC Microphone native rate
-# NUM_CHANNELS = 1
-# FRAME_SAMPLES = 480  # 10ms at 48kHz - required for APM
-# BLOCKSIZE = 4800  # 100ms buffer
-
-
 # dB meter settings
-MAX_AUDIO_BAR = 20  # Reduced from 30 to make display more compact
+MAX_AUDIO_BAR = 20 # 20 chars wide
 INPUT_DB_MIN = -70.0
 INPUT_DB_MAX = 0.0
 FPS = 16
@@ -730,9 +721,9 @@ class AudioStreamer:
             is_muted = self.is_muted
         
         if is_muted:
-            live_indicator = f"{_esc(90)}●{_esc(0)}"  # Gray dot
+            live_indicator = f"{_esc(90)}●{_esc(0)} "  # Gray dot
         else:
-            live_indicator = f"{_esc(91)}●{_esc(0)}"   # Red dot
+            live_indicator = f"{_esc(1, 38, 2, 255, 0, 0)}●{_esc(0)} "   # Bright red dot
         
         # Local mic part
         local_part = f"{live_indicator}Mic[{self.micro_db:5.1f}]{_esc(color_code)}[{bar}]{_esc(0)}"
@@ -754,7 +745,7 @@ class AudioStreamer:
                 participant_color_code = 31 if participant_amplitude_db > 0.75 else 33 if participant_amplitude_db > 0.5 else 32
                 participant_bar = "#" * participant_nb_bar + "-" * ((MAX_AUDIO_BAR // 2) - participant_nb_bar)
                 
-                participant_indicator = f"{_esc(94)}●{_esc(0)}"  # Blue dot for remote participants
+                participant_indicator = f"{_esc(94)}●{_esc(0)} "  # Blue dot for remote participants
                 
                 participant_part = f"{participant_indicator}{info['name'][:6]}[{info['db_level']:5.1f}]{_esc(participant_color_code)}[{participant_bar}]{_esc(0)}"
                 meter_parts.append(participant_part)
