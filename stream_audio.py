@@ -473,7 +473,7 @@ class AudioStreamer:
             live_indicator = f"{_esc(91)}●{_esc(0)}"   # Red dot
         
         # Local mic part
-        local_part = f"{live_indicator}Mic[{self.micro_db:4.1f}]{_esc(color_code)}[{bar}]{_esc(0)}"
+        local_part = f"{live_indicator}Mic[{self.micro_db:5.1f}]{_esc(color_code)}[{bar}]{_esc(0)}"
         meter_parts.append(local_part)
         
         # Add participant meters (compact format)
@@ -494,7 +494,7 @@ class AudioStreamer:
                 
                 participant_indicator = f"{_esc(94)}●{_esc(0)}"  # Blue dot for remote participants
                 
-                participant_part = f"{participant_indicator}{info['name'][:6]}[{info['db_level']:4.1f}]{_esc(participant_color_code)}[{participant_bar}]{_esc(0)}"
+                participant_part = f"{participant_indicator}{info['name'][:6]}[{info['db_level']:5.1f}]{_esc(participant_color_code)}[{participant_bar}]{_esc(0)}"
                 meter_parts.append(participant_part)
         
         # Compact status info
