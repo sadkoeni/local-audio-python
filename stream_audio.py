@@ -46,7 +46,7 @@ BLOCKSIZE = 2400  # 100ms buffer
 
 
 # dB meter settings
-MAX_AUDIO_BAR = 30
+MAX_AUDIO_BAR = 20  # Reduced from 30 to make display more compact
 INPUT_DB_MIN = -70.0
 INPUT_DB_MAX = 0.0
 FPS = 16
@@ -460,18 +460,18 @@ class AudioStreamer:
             is_muted = self.is_muted
         
         if is_muted:
-            live_indicator = f"{_esc(90)}● MUTED{_esc(0)}"  # Gray dot
+            live_indicator = f"{_esc(90)}●{_esc(0)}"  # Gray dot, removed text
         else:
-            live_indicator = f"{_esc(91)}● LIVE{_esc(0)}"   # Red dot
+            live_indicator = f"{_esc(91)}●{_esc(0)}"   # Red dot, removed text
         
-        # Add debug info to meter
-        status_info = f"[IN:{self.input_callback_count} OUT:{self.output_callback_count} Q:{self.audio_input_queue.qsize()}]"
+        # Compact status info
+        status_info = f"I:{self.input_callback_count} O:{self.output_callback_count} Q:{self.audio_input_queue.qsize()}"
         
-        # Build the complete meter line
-        meter_text = f"[Audio] {live_indicator} {self.input_device_name[-15:]} [{self.micro_db:6.2f} dBFS] {_esc(color_code)}[{bar}]{_esc(0)} {status_info} (Press 'm' to toggle mute, 'q' to quit)"
+        # Build the compact meter line
+        meter_text = f"{live_indicator} {self.input_device_name[-10:]} [{self.micro_db:4.1f}dB] {_esc(color_code)}[{bar}]{_esc(0)} {status_info}"
         
-        # Ensure consistent width (pad or truncate to 140 chars to prevent wrapping)
-        meter_text = meter_text[:140].ljust(140)
+        # Ensure consistent width (pad or truncate to 90 chars to prevent wrapping on most terminals)
+        meter_text = meter_text[:90].ljust(90)
         
         with self.stdout_lock:
             # ANSI escape sequences for stable display:
