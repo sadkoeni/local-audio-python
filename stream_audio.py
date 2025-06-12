@@ -16,6 +16,9 @@ import argparse
 import sys
 import time
 import threading
+import select
+import termios
+import tty
 from dotenv import load_dotenv
 from signal import SIGINT, SIGTERM
 from livekit import rtc
@@ -90,6 +93,10 @@ class AudioStreamer:
         self.logger = logging.getLogger(__name__)
         self.loop = loop  # Store the event loop reference
         
+        # Mute state
+        self.is_muted = False
+        self.mute_lock = threading.Lock()
+        
         # Debug counters
         self.input_callback_count = 0
         self.output_callback_count = 0
@@ -131,6 +138,7 @@ class AudioStreamer:
         
         # Control flags
         self.meter_running = True
+        self.keyboard_thread = None
         
     def start_audio_devices(self):
         """Initialize and start audio input/output devices"""
@@ -214,6 +222,48 @@ class AudioStreamer:
             
         self.logger.info("Audio devices stopped")
     
+    def toggle_mute(self):
+        """Toggle microphone mute state"""
+        with self.mute_lock:
+            self.is_muted = not self.is_muted
+            status = "MUTED" if self.is_muted else "LIVE"
+            self.logger.info(f"Microphone {status}")
+
+    def start_keyboard_handler(self):
+        """Start keyboard input handler in a separate thread"""
+        def keyboard_handler():
+            try:
+                # Save original terminal settings
+                old_settings = termios.tcgetattr(sys.stdin)
+                tty.setraw(sys.stdin.fileno())
+                
+                while self.running:
+                    if select.select([sys.stdin], [], [], 0.1)[0]:
+                        key = sys.stdin.read(1)
+                        if key.lower() == 'm':
+                            self.toggle_mute()
+                        elif key == '\x03':  # Ctrl+C
+                            break
+                            
+            except Exception as e:
+                self.logger.error(f"Keyboard handler error: {e}")
+            finally:
+                # Restore terminal settings
+                try:
+                    termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+                except:
+                    pass
+        
+        self.keyboard_thread = threading.Thread(target=keyboard_handler, daemon=True)
+        self.keyboard_thread.start()
+        self.logger.info("Keyboard handler started - Press 'm' to toggle mute")
+
+    def stop_keyboard_handler(self):
+        """Stop keyboard handler"""
+        if self.keyboard_thread and self.keyboard_thread.is_alive():
+            # Signal will be handled by the thread's loop
+            pass
+
     def _input_callback(self, indata: np.ndarray, frame_count: int, time_info, status) -> None:
         """Sounddevice input callback - processes microphone audio"""
         self.input_callback_count += 1
@@ -242,6 +292,15 @@ class AudioStreamer:
             self.logger.info(f"Audio level check - max: {np.max(np.abs(indata))}, "
                            f"mean: {np.mean(np.abs(indata)):.2f}")
             
+        # Check mute state and apply if needed
+        with self.mute_lock:
+            is_muted = self.is_muted
+        
+        # If muted, replace audio data with silence but continue processing for meter
+        processed_indata = indata.copy()
+        if is_muted:
+            processed_indata.fill(0)
+            
         # Calculate delays for AEC
         self.input_delay = time_info.currentTime - time_info.inputBufferAdcTime
         total_delay = self.output_delay + self.input_delay
@@ -261,7 +320,9 @@ class AudioStreamer:
             if end > frame_count:
                 break
                 
-            capture_chunk = indata[start:end, 0]  # Get mono channel
+            # Use original data for meter calculation, processed data for transmission
+            original_chunk = indata[start:end, 0]  # For meter calculation
+            capture_chunk = processed_indata[start:end, 0]  # For transmission (may be muted)
             
             # Create audio frame for AEC processing
             capture_frame = rtc.AudioFrame(
@@ -282,9 +343,8 @@ class AudioStreamer:
                 except Exception as e:
                     self.logger.warning(f"Error processing audio stream: {e}")
             
-            # Calculate dB level for meter
-            processed_data = np.frombuffer(capture_frame.data, dtype=np.int16)
-            rms = np.sqrt(np.mean(processed_data.astype(np.float32) ** 2))
+            # Calculate dB level for meter using original (unmuted) audio
+            rms = np.sqrt(np.mean(original_chunk.astype(np.float32) ** 2))
             max_int16 = np.iinfo(np.int16).max
             self.micro_db = 20.0 * np.log10(rms / max_int16 + 1e-6)
             
@@ -377,7 +437,7 @@ class AudioStreamer:
                         self.logger.warning(f"Error processing reverse stream: {e}")
     
     def print_audio_meter(self):
-        """Print dB meter similar to example.py"""
+        """Print dB meter with live/mute indicator"""
         if not self.meter_running:
             return
             
@@ -387,11 +447,20 @@ class AudioStreamer:
         color_code = 31 if amplitude_db > 0.75 else 33 if amplitude_db > 0.5 else 32
         bar = "#" * nb_bar + "-" * (MAX_AUDIO_BAR - nb_bar)
         
+        # Add live/mute indicator
+        with self.mute_lock:
+            is_muted = self.is_muted
+        
+        if is_muted:
+            live_indicator = f"{_esc(90)}● MUTED{_esc(0)}"  # Gray dot
+        else:
+            live_indicator = f"{_esc(91)}● LIVE{_esc(0)}"   # Red dot
+        
         # Add debug info to meter
         status_info = f"[IN:{self.input_callback_count} OUT:{self.output_callback_count} Q:{self.audio_input_queue.qsize()}]"
         
         sys.stdout.write(
-            f"\r[Audio] {self.input_device_name[-15:]} [{self.micro_db:6.2f} dBFS] {_esc(color_code)}[{bar}]{_esc(0)} {status_info}"
+            f"\r[Audio] {live_indicator} {self.input_device_name[-15:]} [{self.micro_db:6.2f} dBFS] {_esc(color_code)}[{bar}]{_esc(0)} {status_info} (Press 'm' to toggle mute)"
         )
         sys.stdout.flush()
 
@@ -515,6 +584,10 @@ async def main(participant_name: str, enable_aec: bool = True):
         logger.info("Starting audio devices...")
         streamer.start_audio_devices()
         
+        # Start keyboard handler
+        logger.info("Starting keyboard handler...")
+        streamer.start_keyboard_handler()
+        
         # Connect to LiveKit room
         logger.info("Connecting to LiveKit room...")
         token = generate_token(ROOM_NAME, participant_name, participant_name)
@@ -574,10 +647,11 @@ async def main(participant_name: str, enable_aec: bool = True):
                 pass
         
         streamer.stop_audio_devices()
+        streamer.stop_keyboard_handler()
         await room.disconnect()
         
         # Clear the meter line
-        sys.stdout.write("\r" + " " * 120 + "\r")
+        sys.stdout.write("\r" + " " * 150 + "\r")
         sys.stdout.flush()
         logger.info("=== CLEANUP COMPLETE ===")
 
