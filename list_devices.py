@@ -5,7 +5,6 @@
 # ]
 # ///
 
-import pyaudio
 import sounddevice as sd
 
 def list_audio_devices():
