@@ -34,10 +34,10 @@ load_dotenv()
 LIVEKIT_URL = os.environ.get("LIVEKIT_URL")
 ROOM_NAME = os.environ.get("ROOM_NAME")
 
-SAMPLE_RATE = 24000  # 48kHz to match DC Microphone native rate
+SAMPLE_RATE = 48000  # 48kHz to match DC Microphone native rate
 NUM_CHANNELS = 1
-FRAME_SAMPLES = 240  # 10ms at 48kHz - required for APM
-BLOCKSIZE = 2400  # 100ms buffer
+FRAME_SAMPLES = 480  # 10ms at 48kHz - required for APM
+BLOCKSIZE = 4800  # 100ms buffer
 
 # dB meter settings
 MAX_AUDIO_BAR = 20 # 20 chars wide
