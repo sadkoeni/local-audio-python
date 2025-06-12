@@ -140,6 +140,10 @@ class AudioStreamer:
         self.meter_running = True
         self.keyboard_thread = None
         
+        # UI control for stable meter display
+        self.stdout_lock = threading.Lock()
+        self.meter_line_reserved = False
+        
     def start_audio_devices(self):
         """Initialize and start audio input/output devices"""
         try:
@@ -437,7 +441,7 @@ class AudioStreamer:
                         self.logger.warning(f"Error processing reverse stream: {e}")
     
     def print_audio_meter(self):
-        """Print dB meter with live/mute indicator"""
+        """Print dB meter with live/mute indicator - stable non-scrolling version"""
         if not self.meter_running:
             return
             
@@ -459,10 +463,34 @@ class AudioStreamer:
         # Add debug info to meter
         status_info = f"[IN:{self.input_callback_count} OUT:{self.output_callback_count} Q:{self.audio_input_queue.qsize()}]"
         
-        sys.stdout.write(
-            f"\r[Audio] {live_indicator} {self.input_device_name[-15:]} [{self.micro_db:6.2f} dBFS] {_esc(color_code)}[{bar}]{_esc(0)} {status_info} (Press 'm' to toggle mute)"
-        )
-        sys.stdout.flush()
+        # Build the complete meter line
+        meter_text = f"[Audio] {live_indicator} {self.input_device_name[-15:]} [{self.micro_db:6.2f} dBFS] {_esc(color_code)}[{bar}]{_esc(0)} {status_info} (Press 'm' to toggle mute)"
+        
+        # Ensure consistent width (pad or truncate to 140 chars to prevent wrapping)
+        meter_text = meter_text[:140].ljust(140)
+        
+        with self.stdout_lock:
+            # ANSI escape sequences for stable display:
+            # \033[2K - Clear entire line
+            # \r - Return to beginning of line  
+            # \033[?25l - Hide cursor
+            # \033[?25h - Show cursor (we'll show it later)
+            sys.stdout.write(f"\033[2K\r\033[?25l{meter_text}")
+            sys.stdout.flush()
+
+    def init_terminal(self):
+        """Initialize terminal for stable UI display"""
+        with self.stdout_lock:
+            # Hide cursor for cleaner display
+            sys.stdout.write("\033[?25l")
+            sys.stdout.flush()
+            
+    def restore_terminal(self):
+        """Restore terminal to normal state"""
+        with self.stdout_lock:
+            # Clear the meter line and show cursor
+            sys.stdout.write("\033[2K\r\033[?25h")
+            sys.stdout.flush()
 
 async def main(participant_name: str, enable_aec: bool = True):
     logger = logging.getLogger(__name__)
@@ -588,6 +616,9 @@ async def main(participant_name: str, enable_aec: bool = True):
         logger.info("Starting keyboard handler...")
         streamer.start_keyboard_handler()
         
+        # Initialize terminal for stable UI
+        streamer.init_terminal()
+        
         # Connect to LiveKit room
         logger.info("Connecting to LiveKit room...")
         token = generate_token(ROOM_NAME, participant_name, participant_name)
@@ -651,8 +682,7 @@ async def main(participant_name: str, enable_aec: bool = True):
         await room.disconnect()
         
         # Clear the meter line
-        sys.stdout.write("\r" + " " * 150 + "\r")
-        sys.stdout.flush()
+        streamer.restore_terminal()
         logger.info("=== CLEANUP COMPLETE ===")
 
 if __name__ == "__main__":
@@ -684,15 +714,17 @@ if __name__ == "__main__":
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[
             logging.FileHandler("stream_audio.log"),
-            logging.StreamHandler(),
+            # Only log to console in debug mode - otherwise interferes with meter
+            *([logging.StreamHandler()] if args.debug else []),
         ],
     )
     
-    # Also log to console with colors for easier debugging
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(log_level)
-    formatter = logging.Formatter('%(levelname)s: %(message)s')
-    console_handler.setFormatter(formatter)
+    # Also log to console with colors for easier debugging (only in debug mode)
+    if args.debug:
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(log_level)
+        formatter = logging.Formatter('%(levelname)s: %(message)s')
+        console_handler.setFormatter(formatter)
     
     # Fix deprecation warning by using asyncio.run() instead of get_event_loop()
     async def cleanup():
