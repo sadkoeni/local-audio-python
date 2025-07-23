@@ -6,7 +6,7 @@ This enhancement adds tool execution capabilities to the LiveKit audio streaming
 
 1. **`local_tool_responses.py`** - User-configurable module for defining tools
    - Contains decorator-based tool registration system
-   - Includes 5 example tools (echo, system_info, calculate, file_operations, template)
+   - Includes 1 default template tool that prints tool name and arguments
    - Clean and extensible design for users to add their own tools
 
 2. **`lightberry_tool_server.py`** - Core server that processes tool calls

@@ -181,90 +181,10 @@ async def async_operation(url: str) -> dict:
 
 ## Built-in Tools
 
-The system comes with several example tools:
-
-### echo
-Echoes back the input message.
-
-**Request:**
-```json
-{
-  "name": "echo",
-  "message": "Hello, World!"
-}
-```
-
-**Response:**
-```json
-{
-  "original_message": "Hello, World!",
-  "echo": "Hello, World!",
-  "timestamp": "1234567890.123"
-}
-```
-
-### system_info
-Returns basic system information.
-
-**Request:**
-```json
-{
-  "name": "system_info"
-}
-```
-
-**Response:**
-```json
-{
-  "platform": "Linux",
-  "platform_version": "...",
-  "hostname": "my-computer",
-  "python_version": "3.10.0",
-  "cpu_count": 8,
-  "current_directory": "/home/user"
-}
-```
-
-### calculate
-Safely evaluates mathematical expressions.
-
-**Request:**
-```json
-{
-  "name": "calculate",
-  "expression": "2 + 2 * 3"
-}
-```
-
-**Response:**
-```json
-{
-  "expression": "2 + 2 * 3",
-  "result": 8,
-  "success": true
-}
-```
-
-### file_operations
-Performs basic file operations.
-
-**Request:**
-```json
-{
-  "name": "file_operations",
-  "operation": "read",
-  "path": "example.txt"
-}
-```
-
-**Operations:**
-- `read` - Read file contents
-- `write` - Write content to file (requires `content` parameter)
-- `exists` - Check if file/directory exists
-- `list` - List directory contents
+The system comes with one default template tool:
 
 ### template
-A flexible template function that accepts any arguments.
+A flexible template function that accepts any arguments. This tool will print the tool name and all arguments it receives to the console.
 
 **Request:**
 ```json

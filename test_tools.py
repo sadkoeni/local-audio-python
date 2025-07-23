@@ -37,34 +37,30 @@ async def test_tool_server():
     print("Testing tool calls...")
     print("-"*60)
     
-    # Test tool calls
+    # Test tool calls for the template tool
     test_calls = [
         {
-            "name": "echo",
+            "name": "template",
             "message": "Hello, Lightberry!"
-        },
-        {
-            "name": "system_info"
-        },
-        {
-            "name": "calculate",
-            "expression": "2 + 2 * 3"
-        },
-        {
-            "name": "file_operations",
-            "operation": "exists",
-            "path": "local_tool_responses.py"
         },
         {
             "name": "template",
             "custom_arg1": "test_value",
             "custom_arg2": 42,
             "nested_data": {"key": "value", "list": [1, 2, 3]}
+        },
+        {
+            "name": "template",
+            "single_arg": "simple test"
+        },
+        {
+            "name": "template"
+            # No arguments - testing empty kwargs
         }
     ]
     
-    for call in test_calls:
-        print(f"\n🔧 Testing tool: {call['name']}")
+    for i, call in enumerate(test_calls, 1):
+        print(f"\n🔧 Test {i}: Testing template tool")
         print(f"   Request: {json.dumps(call, indent=2)}")
         
         # Process the tool call
@@ -93,8 +89,8 @@ async def test_tool_server():
         "invalid json",
     ]
     
-    for i, test in enumerate(error_tests):
-        print(f"\n🔧 Error test {i+1}")
+    for i, test in enumerate(error_tests, 1):
+        print(f"\n🔧 Error test {i}")
         if isinstance(test, str):
             print(f"   Request: {test}")
             response = await server.process_tool_call(test)
