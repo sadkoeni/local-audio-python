@@ -41,7 +41,7 @@ class AudioStreamWithTools(stream_audio.AudioStreamer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.tool_server: Optional[LightberryToolServer] = None
-        self.data_channel: Optional[rtc.DataChannel] = None
+        self.room: Optional[rtc.Room] = None
         self.data_channel_name: Optional[str] = None
         
     def set_tool_server(self, tool_server: LightberryToolServer):
@@ -55,6 +55,11 @@ class AudioStreamWithTools(stream_audio.AudioStreamer):
         if self.tool_server:
             self.tool_server.set_data_channel_name(name)
         logger.info(f"Data channel name set to: {name}")
+        
+    def set_room(self, room: rtc.Room):
+        """Set the LiveKit room instance."""
+        self.room = room
+        logger.info("Room connected to audio streamer")
 
 
 async def main_with_tools(
@@ -103,21 +108,24 @@ async def main_with_tools(
     
     # Create LiveKit room
     room = rtc.Room()
+    streamer.set_room(room)
     
-    # Setup data channel handler
-    async def handle_data_received(data: bytes):
-        """Handle data received on the data channel."""
+    # Setup data received handler
+    async def handle_data_received(data_packet: rtc.DataPacket):
+        """Handle data received from LiveKit data channel."""
         try:
-            # Decode the data
-            message = data.decode('utf-8')
-            logger.debug(f"Received data channel message: {message}")
-            
-            # Pass to tool server for processing
-            if streamer.tool_server:
-                await streamer.tool_server.handle_data_message(message)
-            else:
-                logger.warning("Tool server not configured, ignoring data channel message")
+            # Check if this is for our data channel (by topic)
+            if data_channel_name and data_packet.topic == data_channel_name:
+                # Decode the data
+                message = data_packet.data.decode('utf-8')
+                logger.debug(f"Received data channel message: {message}")
                 
+                # Pass to tool server for processing
+                if streamer.tool_server:
+                    await streamer.tool_server.handle_data_message(message)
+                else:
+                    logger.warning("Tool server not configured, ignoring data channel message")
+            
         except Exception as e:
             logger.error(f"Error handling data channel message: {e}")
     
@@ -125,43 +133,26 @@ async def main_with_tools(
     async def send_tool_response(response: Dict[str, Any]):
         """Send tool execution results back via data channel."""
         try:
-            if streamer.data_channel and streamer.data_channel.is_open():
+            if streamer.room and streamer.room.local_participant:
                 response_json = json.dumps(response)
-                await streamer.data_channel.send(response_json.encode('utf-8'))
+                await streamer.room.local_participant.publish_data(
+                    response_json.encode('utf-8'),
+                    kind=rtc.DataPacketKind.KIND_RELIABLE,
+                    topic=data_channel_name
+                )
                 logger.debug(f"Sent tool response: {response_json}")
             else:
-                logger.warning("Data channel not available or not open")
+                logger.warning("Room or local participant not available")
         except Exception as e:
             logger.error(f"Error sending tool response: {e}")
     
     # Configure tool server response callback
     tool_server.set_response_callback(send_tool_response)
     
-    @room.on("data_channel_opened")
-    def on_data_channel_opened(data_channel: rtc.DataChannel):
-        """Handle data channel being opened."""
-        logger.info(f"Data channel opened: {data_channel.label}")
-        
-        # Check if this is our tool channel
-        if data_channel_name and data_channel.label == data_channel_name:
-            streamer.data_channel = data_channel
-            logger.info(f"Tool data channel connected: {data_channel.label}")
-            
-            # Set up message handler
-            @data_channel.on("message")
-            def on_message(message: rtc.DataChannelMessage):
-                if isinstance(message, bytes):
-                    asyncio.create_task(handle_data_received(message))
-                else:
-                    logger.warning(f"Received non-bytes message on data channel: {type(message)}")
-    
-    @room.on("data_channel_closed")
-    def on_data_channel_closed(data_channel: rtc.DataChannel):
-        """Handle data channel being closed."""
-        logger.info(f"Data channel closed: {data_channel.label}")
-        if streamer.data_channel == data_channel:
-            streamer.data_channel = None
-            logger.info("Tool data channel disconnected")
+    @room.on("data_received")
+    def on_data_received(data_packet: rtc.DataPacket):
+        """Handle data received event."""
+        asyncio.create_task(handle_data_received(data_packet))
     
     # Copy event handlers from original stream_audio
     @room.on("track_published")
